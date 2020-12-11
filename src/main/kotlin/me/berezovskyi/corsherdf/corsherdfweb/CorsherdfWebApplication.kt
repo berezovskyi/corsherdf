@@ -25,8 +25,7 @@ fun main(args: Array<String>) {
 @RestController
 class RestController() {
     @GetMapping(
-        value = ["/r/**"],
-        produces = [MediaType.TEXT_PLAIN_VALUE]
+        value = ["/r/**"]
     )
     fun r(request: ServerHttpRequest, response: ServerHttpResponse): Flux<DataBuffer> {
         val uri_p = request.uri.path.substring(3) // skip /r/
@@ -38,11 +37,11 @@ class RestController() {
             .clientConnector(
                 ReactorClientHttpConnector(
                     // need a predicate because 303 redirects are not followed by default
-                    HttpClient.create().followRedirect(BiPredicate { req, resp ->
+                    HttpClient.create().followRedirect { req, resp ->
                         val statusCode = resp.status().code()
                         println("Redirect to ${resp.responseHeaders()["Location"]} / HTTP ${resp.status()}")
                         statusCode in 301..399 || resp.responseHeaders().contains("Location")
-                    })
+                    }
                 )
             )
             .build();
@@ -56,6 +55,7 @@ class RestController() {
             response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = "Accept, OSLC-Core-Version, Configuration-Context, OSLC-Configuration-Context"
 
+            response.headers["Content-Type"] = "text/plain"
             response.headers["X-Content-Type"] = contentType
             response.headers["X-Status-Code"] = it.rawStatusCode().toString()
             if (it.statusCode().isError) {
@@ -65,6 +65,7 @@ class RestController() {
                 response.rawStatusCode = 422
                 Flux.just(DefaultDataBufferFactory.sharedInstance.wrap("Server did not return any RDF".encodeToByteArray()))
             } else {
+                response.headers["Content-Type"] = contentType
                 it.bodyToFlux(DataBuffer::class.java)
             }
         }
