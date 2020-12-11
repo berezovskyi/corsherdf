@@ -14,6 +14,8 @@ Using server-side proxies is not the best approach but in many cases is not avoi
 
 ## Roadmap
 
+- [ ] Shall we respect robots.txt? I am with Archive.org on this one, we don't have to if we are not an _automatic_ bot but only make requests on behalf of users
+- [ ] Add `Forwarded: for=` and `X-Forwared-For:` headers, we are a white proxy
 - [ ] Do Jena model conversion on the fly if the server failed to return highest-q format.
 - [ ] Add caching (considering MapDB, RocksDB, ChronicleMap for now)
 - [ ] Deploy a public instance (fallback only, not for speedup)
