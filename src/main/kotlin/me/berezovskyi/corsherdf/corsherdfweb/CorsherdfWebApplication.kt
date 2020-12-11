@@ -48,7 +48,6 @@ import org.springframework.web.cors.reactive.CorsUtils
 import org.springframework.web.reactive.config.CorsRegistry
 import org.springframework.web.reactive.config.EnableWebFlux
 import org.springframework.web.reactive.config.WebFluxConfigurer
-//import org.springframework.web.cors.reactive.CorsUtils
 
 import org.springframework.web.server.WebFilterChain
 
@@ -63,12 +62,6 @@ class CorsherdfWebApplication
 fun main(args: Array<String>) {
     runApplication<CorsherdfWebApplication>(*args)
 }
-
-//@Configuration
-//class RequestLoggingFilterConfig {
-//
-//
-//}
 
 @Configuration
 @EnableWebFlux
@@ -127,7 +120,7 @@ class RestController() {
         logger.debug("Requesting RDF with this {Accept: {}}", finalAccept)
         val client = WebClient.builder().baseUrl(uri_p)
             .defaultHeader(HttpHeaders.ACCEPT, finalAccept)
-            .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/4.0 (compatible; CORSheRDF/0.1)")
+            .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/4.0 (compatible; CORSheRDF/0.1; +https://github.com/berezovskyi/corsherdf)")
             .clientConnector(
                 ReactorClientHttpConnector(
                     // need a predicate because 303 redirects are not followed by default

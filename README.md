@@ -10,7 +10,7 @@ Using server-side proxies is not the best approach but in many cases is not avoi
 - 🚧 Convert the RDF response if a response did not match your desired `Accept` type.
 - 🚧 Caching for resources that resolved with a 200 code up to 24h before. Endpoint uptime is a known problem in the semantic web / linked data community.
 - 🚧 Speed up traversal of RDF resources across globally distributed origins (self-hosted).
-- 🚧 Serving of the resources that are no longer on the web or cannot be dereferenced but have a prominent place in the LOD. Most likely start is the list of all recognised prefixes under http://prefix.cc/
+- 🚧 Serving of the resources that are no longer on the web or cannot be dereferenced but have a prominent place in the LOD. Most likely start is the list of all recognised prefixes under http://prefix.cc/ (with a likely blacklist for PURL and W3ID as they have a valid process for updating redirects that shall be followed instead)
 
 ## Roadmap
 
@@ -41,7 +41,7 @@ Extra headers added:
 
 Bot user agent:
 
-> Mozilla/4.0 (compatible; CORSheRDF/0.1)
+> Mozilla/4.0 (compatible; CORSheRDF/0.1; +https://github.com/berezovskyi/corsherdf)
 
 Error codes:
 
