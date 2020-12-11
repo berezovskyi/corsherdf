@@ -108,7 +108,7 @@ class RestController() {
         if (request.headers["Accept"]?.contains("html") == true
             || request.headers["Accept"]?.contains("application/json") == true
         ) {
-            response.rawStatusCode = 400;
+            response.rawStatusCode = 406;
             return fluxByteString("Only RDF formats can be requested")
         }
         // TODO make (m AND mList) -> sort by priority ; also add low priorities for us
@@ -126,7 +126,8 @@ class RestController() {
         val finalAccept = MediaType.toString(mediaTypes)
         logger.debug("Requesting RDF with this {Accept: {}}", finalAccept)
         val client = WebClient.builder().baseUrl(uri_p)
-            .defaultHeader("Accept", finalAccept)
+            .defaultHeader(HttpHeaders.ACCEPT, finalAccept)
+            .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/4.0 (compatible; CORSheRDF/0.1)")
             .clientConnector(
                 ReactorClientHttpConnector(
                     // need a predicate because 303 redirects are not followed by default
@@ -149,7 +150,7 @@ class RestController() {
             response.headers["X-Content-Type"] = contentType
             response.headers["X-Status-Code"] = it.rawStatusCode().toString()
             if (it.statusCode().isError) {
-                response.rawStatusCode = 599
+                response.rawStatusCode = 502
                 fluxByteString("Error fetching the resource")
             } else if (contentType.contains("html", ignoreCase = true)) {
                 response.rawStatusCode = 422
