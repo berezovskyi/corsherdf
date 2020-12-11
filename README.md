@@ -24,6 +24,7 @@ Using server-side proxies is not the best approach but in many cases is not avoi
   - [ ] via https://prefix.cc/
   - [ ] via https://lov.linkeddata.es/dataset/lov/
   - [ ] via https://archivo.dbpedia.org/ and potentially `dev` stage ontologies (e.g. via `X-Corsherdf-Dev: allow`)
+- [ ] Get CORSher requirements into DBPedia Archivo as a 5th star
 
 ## Spec
 
@@ -45,7 +46,7 @@ Bot user agent:
 
 Error codes:
 
-- 400: no URI given or bad URI is given
+- 400: no URI given or bad URI is given (most likely URI components after the path were not encoded properly)
 - 405: only GET or HEAD methods are allowed (except for the CORS preflight requests)
 - 406: non-RDF resource requested
 - 422: origin returned non-RDF response
@@ -53,6 +54,7 @@ Error codes:
 - 502: origin returned a 4xx/5xx response
 - 503: there are too many requests in the queue, retry soon
 - 504: origin timeout
+- 507: the RDF document requested is too large
 
 Example:
 
