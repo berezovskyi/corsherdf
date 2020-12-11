@@ -42,7 +42,7 @@ Extra headers added:
 
 Bot user agent:
 
-> Mozilla/4.0 (compatible; CORSheRDF/0.1; +https://github.com/berezovskyi/corsherdf)
+> `Mozilla/4.0 (compatible; CORSheRDF/0.1; +https://github.com/berezovskyi/corsherdf)`
 
 Error codes:
 
