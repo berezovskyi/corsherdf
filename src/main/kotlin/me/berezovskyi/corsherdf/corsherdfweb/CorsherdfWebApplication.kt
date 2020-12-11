@@ -39,6 +39,22 @@ import org.springframework.web.server.WebFilter
 import reactor.core.publisher.Flux
 import reactor.netty.http.client.HttpClient
 
+import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpMethod
+import reactor.core.publisher.Mono
+
+import org.springframework.http.HttpStatus
+import org.springframework.web.cors.reactive.CorsUtils
+import org.springframework.web.reactive.config.CorsRegistry
+import org.springframework.web.reactive.config.EnableWebFlux
+import org.springframework.web.reactive.config.WebFluxConfigurer
+//import org.springframework.web.cors.reactive.CorsUtils
+
+import org.springframework.web.server.WebFilterChain
+
+import org.springframework.web.server.ServerWebExchange
+
+
 val logger = LoggerFactory.getLogger(CorsherdfWebApplication::class.java)
 
 @SpringBootApplication
@@ -48,8 +64,15 @@ fun main(args: Array<String>) {
     runApplication<CorsherdfWebApplication>(*args)
 }
 
+//@Configuration
+//class RequestLoggingFilterConfig {
+//
+//
+//}
+
 @Configuration
-class RequestLoggingFilterConfig {
+@EnableWebFlux
+class WebConfig : WebFluxConfigurer {
     @Bean
     fun loggingFilter(): WebFilter =
         WebFilter { exchange, chain ->
@@ -59,41 +82,23 @@ class RequestLoggingFilterConfig {
             logger.info("Handling with response ${exchange.response}")
             return@WebFilter result
         }
+
+    override fun addCorsMappings(registry: CorsRegistry) {
+        registry.addMapping("/**")
+            .allowedOriginPatterns("*") // any host or put domain(s) here
+            .allowedMethods("GET", "HEAD", "OPTIONS") // put the http verbs you want allow
+            .allowedHeaders("content-type", "oslc-core-version", "configuration-context", "oslc-configuration-context") // put the http headers you want allow
+        //todo cache cors response
+    }
 }
 
 @RestController
 class RestController() {
-    //    @GetMapping(
-//        value = ["/r/**"]
-//    )
-    @RequestMapping("/**", method = [RequestMethod.OPTIONS])
-    fun preflight(request: ServerHttpRequest, response: ServerHttpResponse): Flux<DataBuffer> {
-        var origin = "*"
-        if (request.headers.containsKey("Origin")) {
-            origin = request.headers["Origin"]!!.single()
-        }
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
-//        response.headers["Access-Control-Allow-Headers"] = "Accept, Content-Type, OSLC-Core-Version, Configuration-Context, OSLC-Configuration-Context"
-        response.headers["Access-Control-Allow-Headers"] =
-            "origin, content-type, accept, authorization, oslc-core-version, Configuration-Context, OSLC-Configuration-Context".toLowerCase()
-        response.rawStatusCode = 204;
-        return Flux.empty();
-    }
-
-    //    @GetMapping(
-//        value = ["/r/**"]
-//    )
     @RequestMapping("/r/**", method = [RequestMethod.GET, RequestMethod.HEAD])
     fun r(request: ServerHttpRequest, response: ServerHttpResponse): Flux<DataBuffer> {
         val uri_p = request.uri.path.substring(3) // skip /r/
         // todo 401 if there are any query params, the client failed to escape the uri correctly
         println(uri_p);
-
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] =
-            "Accept, OSLC-Core-Version, Configuration-Context, OSLC-Configuration-Context"
 
         if (Strings.isBlank(uri_p)) {
             response.rawStatusCode = 400;
@@ -117,6 +122,7 @@ class RestController() {
 //        )
         // TODO consider Jena conversion on-the-fly
 
+        // TODO: 2020-12-11 cache reponse
         val finalAccept = MediaType.toString(mediaTypes)
         logger.debug("Requesting RDF with this {Accept: {}}", finalAccept)
         val client = WebClient.builder().baseUrl(uri_p)
@@ -153,7 +159,6 @@ class RestController() {
                 it.bodyToFlux(DataBuffer::class.java)
             }
         }
-//        return Flux.empty<DataBuffer>();
     }
 
     private fun fluxByteString(s: String): Flux<DataBuffer> =
