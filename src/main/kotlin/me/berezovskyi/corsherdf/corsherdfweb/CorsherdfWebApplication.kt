@@ -127,7 +127,7 @@ class RestController() {
                     HttpClient.create().followRedirect { req, resp ->
                         val statusCode = resp.status().code()
                         println("Redirect to ${resp.responseHeaders()["Location"]} / HTTP ${resp.status()}")
-                        statusCode in 301..399 || resp.responseHeaders().contains("Location")
+                        statusCode in 301..399 && resp.responseHeaders().contains("Location")
                     }
                 )
             )
