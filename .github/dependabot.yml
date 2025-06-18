@@ -1,0 +1,7 @@
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/" # Check for pom.xml in the root directory
+    schedule:
+      interval: "daily" # Check for updates daily
+    open-pull-requests-limit: 10 # Optional: Limit the number of open PRs from Dependabot
