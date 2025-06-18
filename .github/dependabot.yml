@@ -5,3 +5,8 @@ updates:
     schedule:
       interval: "daily" # Check for updates daily
     open-pull-requests-limit: 10 # Optional: Limit the number of open PRs from Dependabot
+  - package-ecosystem: "github-actions" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    open-pull-requests-limit: 30
+    schedule:
+      interval: "daily"
