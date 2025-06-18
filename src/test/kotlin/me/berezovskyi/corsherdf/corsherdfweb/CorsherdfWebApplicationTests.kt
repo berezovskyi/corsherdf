@@ -36,7 +36,7 @@ class CorsherdfWebApplicationTests {
 
 
     @Test
-    fun testRProxyEndpointWithRdfTarget) {
+    fun testRProxyEndpointWithRdfTarget() {
         val remoteUrl = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
         given()
           .`when`().get("/r/$remoteUrl")
