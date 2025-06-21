@@ -21,19 +21,21 @@ package me.berezovskyi.corsherdf.corsherdfweb
 
 // import org.apache.logging.log4j.util.Strings // Replaced with Kotlin's isBlank()
 import org.slf4j.LoggerFactory
-import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
-import org.eclipse.microprofile.rest.client.inject.RestClient
-import javax.inject.Inject
-import javax.ws.rs.*
-import javax.ws.rs.container.ContainerRequestContext
-import javax.ws.rs.container.ContainerRequestFilter
-import javax.ws.rs.container.ContainerResponseContext
-import javax.ws.rs.container.ContainerResponseFilter
-import javax.ws.rs.core.*
-import javax.ws.rs.ext.Provider
+import jakarta.ws.rs.*
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.container.ContainerRequestFilter
+import jakarta.ws.rs.container.ContainerResponseContext
+import jakarta.ws.rs.container.ContainerResponseFilter
+import jakarta.ws.rs.core.*
+import jakarta.ws.rs.ext.Provider
 import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
 import me.berezovskyi.corsherdf.corsherdfweb.util.BlankUriException
 import me.berezovskyi.corsherdf.corsherdfweb.util.HtmlReturnedException
+import java.net.http.HttpTimeoutException
 
 
 val logger = LoggerFactory.getLogger("CorsherdfWebApplication")
@@ -52,14 +54,19 @@ class LoggingFilter : ContainerRequestFilter, ContainerResponseFilter {
 @Path("/r")
 class RdfResource {
 
-    @Inject
-    @field:RestClient
-    lateinit var rdfClient: RdfClient
+    private val httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build()
 
     @GET
-    @Path("/{uri:.*}") // :.* allows empty URI path param, e.g. for /r/
+    @Path("/{uri:.+}") // :.* allows empty URI path param, e.g. for /r/
     @Produces(MediaType.WILDCARD) // Produces any type, will be set dynamically
-    fun r(@Context requestContext: ContainerRequestContext, @PathParam("uri") remoteUriString: String, @Context httpHeaders: HttpHeaders): Response { // Removed suspend
+    fun r(
+        @Context requestContext: ContainerRequestContext,
+        @PathParam("uri") remoteUriString: String,
+        @Context httpHeaders: HttpHeaders
+    ): Response { // Removed suspend
         val uri_p = remoteUriString
         logger.info("Received remoteUriString: '$uri_p', isBlank: ${uri_p.isBlank()}") // More detailed logging
         // Logging of request is now handled by LoggingFilter
@@ -71,7 +78,10 @@ class RdfResource {
 
         val acceptHeader = httpHeaders.getHeaderString(HttpHeaders.ACCEPT)
         if (acceptHeader?.contains("html", ignoreCase = true) == true ||
-            acceptHeader?.contains("application/json", ignoreCase = true) == true // Assuming JSON is not an RDF format here
+            acceptHeader?.contains(
+                "application/json",
+                ignoreCase = true
+            ) == true // Assuming JSON is not an RDF format here
         ) {
             logger.warn("Accept header requests HTML or JSON, returning 406. Accept: $acceptHeader")
             // Keeping manual response for 406 as it's not covered by new mappers
@@ -82,23 +92,32 @@ class RdfResource {
         }
 
         val finalAccept = acceptHeader ?: "*/*"
-
         try {
             logger.info("Entering try block for URI: '$uri_p'. Final Accept: '$finalAccept'")
-            val targetUri = URI.create(uri_p).toString()
+            val targetUri = URI.create(uri_p)
             logger.info("Successfully created target URI: '$targetUri'")
 
-            val responseFromRemote = kotlinx.coroutines.runBlocking { rdfClient.fetchRdf(targetUri, finalAccept) } // Added runBlocking
-            logger.info("Response from remote for '$targetUri': Status=${responseFromRemote.status}, Content-Type='${responseFromRemote.getHeaderString("Content-Type")}'")
+            val request = HttpRequest.newBuilder()
+                .uri(targetUri)
+                .header("Accept", finalAccept)
+                .GET()
+                .build()
 
+            val responseFromRemote = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray())
 
-            val remoteContentType = responseFromRemote.getHeaderString("Content-Type") ?: MediaType.APPLICATION_OCTET_STREAM
-            val remoteStatusCode = responseFromRemote.status
+            logger.info(
+                "Response from remote for '$targetUri': Status=${responseFromRemote.statusCode()}, Content-Type='${
+                    responseFromRemote.headers().firstValue("Content-Type").orElse("unknown")
+                }'"
+            )
+
+            val remoteContentType =
+                responseFromRemote.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM)
+            val remoteStatusCode = responseFromRemote.statusCode()
 
             val responseBuilder = Response.status(remoteStatusCode)
             responseBuilder.header("X-Content-Type", remoteContentType)
             responseBuilder.header("X-Status-Code", remoteStatusCode)
-
             if (remoteStatusCode >= 400) {
                 logger.warn("Remote server returned error $remoteStatusCode for '$targetUri'. Returning 502.")
                 return Response.status(Response.Status.BAD_GATEWAY)
@@ -112,19 +131,33 @@ class RdfResource {
                 throw HtmlReturnedException(uri_p)
             } else {
                 responseBuilder.type(remoteContentType) // Set the actual content type
-                responseBuilder.entity(responseFromRemote.readEntity(ByteArray::class.java))
+                responseBuilder.entity(responseFromRemote.body())
             }
             return responseBuilder.build()
-
-        } catch (e: WebApplicationException) {
-            logger.error("WebApplicationException from RDF client for '$uri_p': ${e.message}", e)
-            val remoteResponse = e.response
-            val entityMessage = try { remoteResponse?.readEntity(String::class.java) ?: e.message } catch (readEx: Exception) { e.message }
+        } catch (e: HttpTimeoutException) {
+            logger.error("HTTP timeout for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                .entity("Timeout while fetching from $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: java.net.ConnectException) {
+            logger.error("Connection failed for '$uri_p': ${e.message}", e)
             return Response.status(Response.Status.BAD_GATEWAY)
-                .entity("Failed to fetch from $uri_p. Client Error: $entityMessage. Remote status: ${remoteResponse?.statusInfo?.toEnum()?.statusCode ?: "N/A"}")
-                .type(MediaType.TEXT_PLAIN) // Using .type() as per instruction
-                .header("X-Content-Type", remoteResponse?.mediaType ?: MediaType.TEXT_PLAIN)
-                .header("X-Status-Code", remoteResponse?.statusInfo?.toEnum()?.statusCode ?: 502)
+                .entity("Failed to connect to $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: java.io.IOException) {
+            logger.error("IO Exception for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.BAD_GATEWAY)
+                .entity("Network error while fetching from $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: InterruptedException) {
+            logger.error("Request interrupted for '$uri_p': ${e.message}", e)
+            Thread.currentThread().interrupt() // Restore interrupted status
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity("Request was interrupted for $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
                 .build()
         } catch (e: IllegalArgumentException) {
             logger.error("Invalid URI syntax for '$uri_p': ${e.message}", e)
@@ -140,11 +173,4 @@ class RdfResource {
                 .build()
         }
     }
-}
-
-@RegisterRestClient(configKey="rdf-client")
-interface RdfClient {
-    @GET
-    @Path("/{uri}")
-    suspend fun fetchRdf(@PathParam("uri") uri: String, @HeaderParam(HttpHeaders.ACCEPT) accept: String): Response // Removed default User-Agent
 }

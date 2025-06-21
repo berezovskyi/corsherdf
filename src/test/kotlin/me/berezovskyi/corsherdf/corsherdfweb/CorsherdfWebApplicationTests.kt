@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType // Added for RestAssured ContentType.TEXT
 import org.hamcrest.CoreMatchers.`is` // For strict body matching
-import javax.ws.rs.core.MediaType // Added for MediaType.TEXT_PLAIN
+import jakarta.ws.rs.core.MediaType // Added for MediaType.TEXT_PLAIN
 
 @QuarkusTest
 class CorsherdfWebApplicationTests {
