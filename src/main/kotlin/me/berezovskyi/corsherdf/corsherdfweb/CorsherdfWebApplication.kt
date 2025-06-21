@@ -19,142 +19,158 @@
  */
 package me.berezovskyi.corsherdf.corsherdfweb
 
-import org.apache.logging.log4j.util.Strings
+// import org.apache.logging.log4j.util.Strings // Replaced with Kotlin's isBlank()
 import org.slf4j.LoggerFactory
-import org.springframework.boot.autoconfigure.SpringBootApplication
-import org.springframework.boot.runApplication
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
-import org.springframework.core.io.buffer.DataBuffer
-import org.springframework.core.io.buffer.DefaultDataBufferFactory
-import org.springframework.http.MediaType
-import org.springframework.http.client.reactive.ReactorClientHttpConnector
-import org.springframework.http.server.reactive.ServerHttpRequest
-import org.springframework.http.server.reactive.ServerHttpResponse
-import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestMethod
-import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.reactive.function.client.WebClient
-import org.springframework.web.server.WebFilter
-import reactor.core.publisher.Flux
-import reactor.netty.http.client.HttpClient
-
-import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpMethod
-import reactor.core.publisher.Mono
-
-import org.springframework.http.HttpStatus
-import org.springframework.web.cors.reactive.CorsUtils
-import org.springframework.web.reactive.config.CorsRegistry
-import org.springframework.web.reactive.config.EnableWebFlux
-import org.springframework.web.reactive.config.WebFluxConfigurer
-
-import org.springframework.web.server.WebFilterChain
-
-import org.springframework.web.server.ServerWebExchange
+import jakarta.ws.rs.*
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.container.ContainerRequestFilter
+import jakarta.ws.rs.container.ContainerResponseContext
+import jakarta.ws.rs.container.ContainerResponseFilter
+import jakarta.ws.rs.core.*
+import jakarta.ws.rs.ext.Provider
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+import me.berezovskyi.corsherdf.corsherdfweb.util.BlankUriException
+import me.berezovskyi.corsherdf.corsherdfweb.util.HtmlReturnedException
+import java.net.http.HttpTimeoutException
 
 
-val logger = LoggerFactory.getLogger(CorsherdfWebApplication::class.java)
+val logger = LoggerFactory.getLogger("CorsherdfWebApplication")
 
-@SpringBootApplication
-class CorsherdfWebApplication
+@Provider
+class LoggingFilter : ContainerRequestFilter, ContainerResponseFilter {
+    override fun filter(requestContext: ContainerRequestContext) {
+        logger.info("Processing request method=${requestContext.method} path=${requestContext.uriInfo.path} params=[${requestContext.uriInfo.queryParameters}] headers=[${requestContext.headers}]")
+    }
 
-fun main(args: Array<String>) {
-    runApplication<CorsherdfWebApplication>(*args)
-}
-
-@Configuration
-@EnableWebFlux
-class WebConfig : WebFluxConfigurer {
-    @Bean
-    fun loggingFilter(): WebFilter =
-        WebFilter { exchange, chain ->
-            val request = exchange.request
-            logger.info("Processing request method=${request.method} path=${request.path.pathWithinApplication()} params=[${request.queryParams}] body=[${request.body}]")
-            val result = chain.filter(exchange)
-            logger.info("Handling with response ${exchange.response}")
-            return@WebFilter result
-        }
-
-    override fun addCorsMappings(registry: CorsRegistry) {
-        registry.addMapping("/**")
-            .allowedOriginPatterns("*") // any host or put domain(s) here
-            .allowedMethods("GET", "HEAD", "OPTIONS") // put the http verbs you want allow
-            .allowedHeaders("content-type", "oslc-core-version", "configuration-context", "oslc-configuration-context") // put the http headers you want allow
-        //todo cache cors response
+    override fun filter(requestContext: ContainerRequestContext, responseContext: ContainerResponseContext) {
+        logger.info("Handling response for path=${requestContext.uriInfo.path} with status=${responseContext.statusInfo} headers=[${responseContext.headers}]")
     }
 }
 
-@RestController
-class RestController() {
-    @RequestMapping("/r/**", method = [RequestMethod.GET, RequestMethod.HEAD])
-    fun r(request: ServerHttpRequest, response: ServerHttpResponse): Flux<DataBuffer> {
-        val uri_p = request.uri.path.substring(3) // skip /r/
-        // todo 401 if there are any query params, the client failed to escape the uri correctly
-        println(uri_p);
+@Path("/r")
+class RdfResource {
 
-        if (Strings.isBlank(uri_p)) {
-            response.rawStatusCode = 400;
-            return fluxByteString("Pass the RDF document URI after /r/")
+    private val httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(30))
+        .followRedirects(HttpClient.Redirect.NORMAL)
+        .build()
+
+    @GET
+    @Path("/{uri:.+}") // :.* allows empty URI path param, e.g. for /r/
+    @Produces(MediaType.WILDCARD) // Produces any type, will be set dynamically
+    fun r(
+        @Context requestContext: ContainerRequestContext,
+        @PathParam("uri") remoteUriString: String,
+        @Context httpHeaders: HttpHeaders
+    ): Response { // Removed suspend
+        val uri_p = remoteUriString
+        logger.info("Received remoteUriString: '$uri_p', isBlank: ${uri_p.isBlank()}") // More detailed logging
+        // Logging of request is now handled by LoggingFilter
+
+        if (uri_p.isBlank()) {
+            logger.warn("uri_p is blank, throwing BlankUriException. Value: '$uri_p'")
+            throw BlankUriException()
         }
 
-        if (request.headers["Accept"]?.contains("html") == true
-            || request.headers["Accept"]?.contains("application/json") == true
+        val acceptHeader = httpHeaders.getHeaderString(HttpHeaders.ACCEPT)
+        if (acceptHeader?.contains("html", ignoreCase = true) == true ||
+            acceptHeader?.contains(
+                "application/json",
+                ignoreCase = true
+            ) == true // Assuming JSON is not an RDF format here
         ) {
-            response.rawStatusCode = 406;
-            return fluxByteString("Only RDF formats can be requested")
+            logger.warn("Accept header requests HTML or JSON, returning 406. Accept: $acceptHeader")
+            // Keeping manual response for 406 as it's not covered by new mappers
+            return Response.status(Response.Status.NOT_ACCEPTABLE)
+                .entity("Only RDF formats can be requested")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
         }
-        // TODO make (m AND mList) -> sort by priority ; also add low priorities for us
-        val mediaTypes = MediaType.parseMediaTypes(request.headers["Accept"])
 
-        // TODO allow "annoying" content negotiation by passing 1 Accept header at a time
-//        mediaTypes.addAll(
-//            listOf("text/turtle", "application/rdf+xml", "application/ntriples", "application/ld+json").map(
-//                MediaType::parseMediaType
-//            )
-//        )
-        // TODO consider Jena conversion on-the-fly
+        val finalAccept = acceptHeader ?: "*/*"
+        try {
+            logger.info("Entering try block for URI: '$uri_p'. Final Accept: '$finalAccept'")
+            val targetUri = URI.create(uri_p)
+            logger.info("Successfully created target URI: '$targetUri'")
 
-        // TODO: 2020-12-11 cache reponse
-        val finalAccept = MediaType.toString(mediaTypes)
-        logger.debug("Requesting RDF with this {Accept: {}}", finalAccept)
-        val client = WebClient.builder().baseUrl(uri_p)
-            .defaultHeader(HttpHeaders.ACCEPT, finalAccept)
-            .defaultHeader(HttpHeaders.USER_AGENT, "Mozilla/4.0 (compatible; CORSheRDF/0.1; +https://github.com/berezovskyi/corsherdf)")
-            .clientConnector(
-                ReactorClientHttpConnector(
-                    // need a predicate because 303 redirects are not followed by default
-                    HttpClient.create().followRedirect { req, resp ->
-                        val statusCode = resp.status().code()
-                        println("Redirect to ${resp.responseHeaders()["Location"]} / HTTP ${resp.status()}")
-                        statusCode in 301..399 && resp.responseHeaders().contains("Location")
-                    }
-                )
+            val request = HttpRequest.newBuilder()
+                .uri(targetUri)
+                .header("Accept", finalAccept)
+                .GET()
+                .build()
+
+            val responseFromRemote = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray())
+
+            logger.info(
+                "Response from remote for '$targetUri': Status=${responseFromRemote.statusCode()}, Content-Type='${
+                    responseFromRemote.headers().firstValue("Content-Type").orElse("unknown")
+                }'"
             )
-            .build();
 
-        //TODO timeout
-        return client.get().exchangeToFlux {
-            val contentType: String = it.headers().header("Content-Type").first()
-            println("${it.rawStatusCode()}/$contentType")
+            val remoteContentType =
+                responseFromRemote.headers().firstValue("Content-Type").orElse(MediaType.APPLICATION_OCTET_STREAM)
+            val remoteStatusCode = responseFromRemote.statusCode()
 
-
-            response.headers["Content-Type"] = "text/plain"
-            response.headers["X-Content-Type"] = contentType
-            response.headers["X-Status-Code"] = it.rawStatusCode().toString()
-            if (it.statusCode().isError) {
-                response.rawStatusCode = 502
-                fluxByteString("Error fetching the resource")
-            } else if (contentType.contains("html", ignoreCase = true)) {
-                response.rawStatusCode = 422
-                fluxByteString("Server did not return any RDF")
+            val responseBuilder = Response.status(remoteStatusCode)
+            responseBuilder.header("X-Content-Type", remoteContentType)
+            responseBuilder.header("X-Status-Code", remoteStatusCode)
+            if (remoteStatusCode >= 400) {
+                logger.warn("Remote server returned error $remoteStatusCode for '$targetUri'. Returning 502.")
+                return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("Error fetching the resource from $uri_p. Status: $remoteStatusCode")
+                    .type(MediaType.TEXT_PLAIN) // Using .type() as per instruction
+                    .header("X-Content-Type", remoteContentType)
+                    .header("X-Status-Code", remoteStatusCode)
+                    .build()
+            } else if (remoteContentType.contains("html", ignoreCase = true)) {
+                logger.warn("Remote server returned HTML for '$targetUri'. Throwing HtmlReturnedException.")
+                throw HtmlReturnedException(uri_p)
             } else {
-                response.headers["Content-Type"] = contentType
-                it.bodyToFlux(DataBuffer::class.java)
+                responseBuilder.type(remoteContentType) // Set the actual content type
+                responseBuilder.entity(responseFromRemote.body())
             }
+            return responseBuilder.build()
+        } catch (e: HttpTimeoutException) {
+            logger.error("HTTP timeout for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                .entity("Timeout while fetching from $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: java.net.ConnectException) {
+            logger.error("Connection failed for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.BAD_GATEWAY)
+                .entity("Failed to connect to $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: java.io.IOException) {
+            logger.error("IO Exception for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.BAD_GATEWAY)
+                .entity("Network error while fetching from $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: InterruptedException) {
+            logger.error("Request interrupted for '$uri_p': ${e.message}", e)
+            Thread.currentThread().interrupt() // Restore interrupted status
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity("Request was interrupted for $uri_p. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN)
+                .build()
+        } catch (e: IllegalArgumentException) {
+            logger.error("Invalid URI syntax for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.BAD_REQUEST)
+                .entity("Invalid URI syntax provided for: '$uri_p'. Error: ${e.message}")
+                .type(MediaType.TEXT_PLAIN) // Using .type() as per instruction
+                .build()
+        } catch (e: Exception) { // Catch all other exceptions
+            logger.error("Generic Exception (e.g. network, processing) for '$uri_p': ${e.message}", e)
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity("Error proxying the request to $uri_p. Message: ${e.message}")
+                .type(MediaType.TEXT_PLAIN) // Using .type() as per instruction
+                .build()
         }
     }
-
-    private fun fluxByteString(s: String): Flux<DataBuffer> =
-        Flux.just(DefaultDataBufferFactory.sharedInstance.wrap(s.encodeToByteArray()))
 }

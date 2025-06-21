@@ -1,0 +1,24 @@
+# 404
+GET http://localhost:8080
+
+###
+
+# 400
+http://localhost:8080/r/
+Accept: text/turtle
+
+###
+
+# 200
+http://localhost:8080/r/http%3A%2F%2Fwww.w3.org%2F1999%2F02%2F22-rdf-syntax-ns
+Accept: text/turtle
+
+###
+
+# 400
+http://localhost:8080/r/xyz
+
+###
+
+# 500
+http://localhost:8080/r/http%3A%2F%2Fexample.com
